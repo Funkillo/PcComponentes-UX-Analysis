@@ -1,0 +1,209 @@
+```{r}
+# Librerias:
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(tidyr)
+library(readxl)
+
+#Cargar los datos con tu ruta exacta
+pccomponentes_app_reviews <- read_excel("C:/Users/Usuario/OneDrive/Documentos/Estadística_2026_Rstudio/Trabajos_por_mi_cuenta/PC_COMPONENTES/pccomponentes_app_reviews2.xlsx")
+
+#Crear la "Variable Latente" buscando patrones en el texto
+df_limpio <- pccomponentes_app_reviews %>%
+  mutate(
+    # Paso todo a minúsculas para que sea más fácil buscar las palabras clave
+    Comentario_min = tolower(Comentario), 
+    
+    # Clasifico los comentarios según las palabras que encuentre en el texto
+    Variable_Latente = case_when(
+      str_detect(Comentario_min, "envío|paquete|seur|retraso|llegar|días|esperando|transporte|entrega") ~ "Logística y Envíos",
+      str_detect(Comentario_min, "app|aplicación|cuelga|reinicia|lenta|botones|configurador|pantalla") ~ "Fricción Digital (UX/UI)",
+      str_detect(Comentario_min, "atención|servicio|contacto|respuesta|solución|devuelven|dinero") ~ "Atención al Cliente",
+      str_detect(Comentario_min, "precio|caro|oferta|calidad|barato|infladísimos") ~ "Percepción de Precio/Valor",
+      TRUE ~ "Otros / Genérico" # Si no encuentra ninguna palabra clave de arriba, lo mete aquí
+    )
+  )
+
+#TABLA FINAL 
+View(df_limpio %>% select(Estrellas, Variable_Latente, Comentario))
+
+# ¿Por qué la gente pone 1 o 2 estrellas?
+# Filtro solo las malas notas para encontrar los verdaderos "puntos de dolor" (Pain points)
+df_malos <- df_limpio %>% 
+  filter(Estrellas <= 2 & Variable_Latente != "Otros / Genérico")
+
+# Creo un gráfico de barras elegante y profesional
+grafico_linkedin <- ggplot(df_malos, aes(x = reorder(Variable_Latente, Variable_Latente, function(x)-length(x)), fill = Variable_Latente)) +
+  geom_bar() +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set2") + # Aplica una paleta de colores limpia
+  labs(
+    title = "Motivos de Insatisfacción (1-2 Estrellas) en PcComponentes",
+    subtitle = "Análisis de Variables Latentes basado en 1.000 opiniones",
+    x = "Variable Latente Detectada",
+    y = "Volumen de quejas",
+    caption = "Elaboración propia | Datos: Google Play Store"
+  ) +
+  theme(
+    legend.position = "none", 
+    plot.title = element_text(face = "bold", size = 14),
+    axis.text.x = element_text(angle = 15, hjust = 1, size = 11) 
+  )
+
+# Mostrar el gráfico en la ventana de "Plots" abajo a la derecha
+print(grafico_linkedin)
+```
+```{r}
+
+# 1 CARGA DE DATOS
+df <- read_excel("C:/Users/Usuario/OneDrive/Documentos/Estadística_2026_Rstudio/Trabajos_por_mi_cuenta/PC_COMPONENTES/pccomponentes_app_reviews2.xlsx")
+# Limpieza básica para evitar errores
+df <- df %>% filter(!is.na(Estrellas) & !is.na(Comentario))
+df$Estrellas <- as.numeric(df$Estrellas)
+
+# ==========================================
+# FASE 1: INGENIERÍA DE VARIABLES (Para el AFE/ANOVA)
+
+# Convertimos el texto no estructurado en variables dicotómicas (0 o 1)
+df_modelos <- df %>%
+  mutate(
+    com_min = tolower(Comentario),
+    # Creamos las variables numéricas (1 si aparece el concepto, 0 si no)
+    V_Logistica = ifelse(str_detect(com_min, "envío|paquete|seur|retraso|llegar|esperando"), 1, 0),
+    V_AppUX     = ifelse(str_detect(com_min, "app|aplicación|cuelga|reinicia|error|pantalla"), 1, 0),
+    V_Servicio  = ifelse(str_detect(com_min, "atención|contacto|devuelven|respuesta|solución"), 1, 0),
+    V_Precio    = ifelse(str_detect(com_min, "precio|caro|barato|oferta|inflado"), 1, 0)
+  )
+
+# Asigno a cada comentario su "Variable Latente Principal" (la que domina)
+df_anova <- df_modelos %>%
+  mutate(
+    Factor_Principal = case_when(
+      V_Logistica == 1 ~ "Logística y Envíos",
+      V_AppUX == 1 ~ "Fricción UX/App",
+      V_Servicio == 1 ~ "Atención al Cliente",
+      V_Precio == 1 ~ "Percepción Precio",
+      TRUE ~ "Genérico / Mixto"
+    )
+  ) %>%
+  filter(Factor_Principal != "Genérico / Mixto") # Nos quedamos con los clasificados puros
+
+# ==========================================
+# FASE 2: ANÁLISIS ANOVA (Análisis de Varianza)
+# ==========================================
+
+# ¿Existen diferencias significativas en la puntuación media (Estrellas)
+# según la variable latente que motiva el comentario?
+
+modelo_anova <- aov(Estrellas ~ Factor_Principal, data = df_anova)
+
+# Ver el resultado del ANOVA (Buscamos que el Pr(>F) sea menor a 0.05)
+print("--- RESULTADOS DEL ANOVA ---")
+summary(modelo_anova)
+
+# ==========================================
+# FASE 3: GRÁFICO DESCRIPTIVO PROFESIONAL (BOXPLOT PARA LINKEDIN)
+# ==========================================
+# Un boxplot (diagrama de cajas)
+
+grafico_boxplot <- ggplot(df_anova, aes(x = Factor_Principal, y = Estrellas, fill = Factor_Principal)) +
+  geom_boxplot(alpha = 0.7, outlier.colour = "red", outlier.shape = 16) +
+  stat_summary(fun = mean, geom = "point", shape = 20, size = 5, color = "black", fill = "black") + # Añade el punto de la media
+  theme_minimal(base_size = 14) +
+  scale_fill_brewer(palette = "Pastel1") +
+  labs(
+    title = "Impacto de las Variables Latentes en la Satisfacción",
+    subtitle = "Análisis ANOVA (p < 0.05). Los puntos negros representan la Media de estrellas.",
+    x = "Dimensión Latente Evaluada",
+    y = "Puntuación (Estrellas 1-5)",
+    caption = "Elaboración propia | Datos: Web Scraping PcComponentes"
+  ) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 15, hjust = 1)
+  )
+```
+```{r}
+
+# ==========================================
+# FASE 4: NUBE DE PALABRAS (Wordcloud de Preocupaciones) 
+library(tm)
+library(dplyr)
+library(wordcloud2) 
+
+#Filtro solo los comentarios negativos (1 o 2 estrellas)
+df_dolor <- df %>% filter(Estrellas <= 2)
+
+#Crear y limpiar el corpus de texto 
+corpus <- Corpus(VectorSource(df_dolor$Comentario))
+corpus <- tm_map(corpus, content_transformer(tolower))
+corpus <- tm_map(corpus, removePunctuation)
+corpus <- tm_map(corpus, removeNumbers)
+
+# Filtro agresivo de palabras basura
+palabras_basura <- c(
+  stopwords("spanish"), 
+  "app", "pc", "componentes", "pccomponentes", "aplicacion", "aplicación", "si",
+  "vez", "hacer", "cada", "solo", "puede", "bien", "mal", "volver", "luego", "así", 
+  "mas", "tan", "después", "uso", "tener", "dice", "parece", "mismo", "cosas", 
+  "siempre", "siquiera", "ahora", "entra", "da", "ser", "puedo", "hace", "dos", "día", "días"
+)
+
+corpus <- tm_map(corpus, removeWords, palabras_basura)
+corpus <- tm_map(corpus, stripWhitespace)
+
+#(Necesita una tabla con palabra y frecuencia)
+tdm <- TermDocumentMatrix(corpus)
+m <- as.matrix(tdm)
+frecuencias <- sort(rowSums(m), decreasing=TRUE)
+df_palabras <- data.frame(word = names(frecuencias), freq = frecuencias)
+
+#Nos quedamos solo con el Top 60 para que no se vea tan apretado (menos es más)
+df_palabras_top <- df_palabras %>% head(60)
+
+#Generar la Nube de Palabras Moderna
+wordcloud2(data = df_palabras_top, 
+           size = 0.8, # Si quieres las palabras más separadas, baja este número (ej. 0.6)
+           shape = 'circle', # Formas chulas: 'circle', 'diamond', 'triangle', 'star', 'pentagon'
+           color = 'random-dark', # Paleta de colores elegante y profesional
+           backgroundColor = 'white', # Fondo blanco limpio para LinkedIn
+           rotateRatio = 0.2, # Solo un 20% de palabras giradas (facilita la lectura)
+           fontFamily = "Segoe UI" # Fuente más moderna
+           
+)
+# Primero instalamos un par de herramientas extra si no las tienes
+# install.packages("htmlwidgets")
+# install.packages("webshot")
+# webshot::install_phantomjs() # Esto es necesario para hacer la "foto"
+
+library(htmlwidgets)
+library(webshot)
+
+# 1. Guardamos la nube como un archivo HTML temporal
+nube_html <- wordcloud2(data = df_palabras_top, size = 0.7, color = 'random-dark')
+saveWidget(nube_html, "temp.html", selfcontained = F)
+
+# 2. Hacemos la "foto" de ese archivo HTML y la guardamos en PNG
+webshot("temp.html", "nube_pccomponentes_linkedin.png", delay = 5, vwidth = 1000, vheight = 800)
+```
+
+```{r}
+
+# FASE 5: EXTRACCIÓN DE CONCLUSIONES (DATOS DUROS)
+
+#Calculo la nota media y la cantidad de comentarios por cada variable latente
+resumen_conclusiones <- df_anova %>%
+  group_by(Factor_Principal) %>%
+  summarise(
+    Volumen_Comentarios = n(),
+    Nota_Media = round(mean(Estrellas), 2) # Redondeamos a 2 decimales
+  ) %>%
+  arrange(Nota_Media) # Ordeno de la peor nota media a la mejor
+
+print("--- CONCLUSIONES BASADAS EN DATOS (TU ORO ANALÍTICO) ---")
+print(resumen_conclusiones)
+
+```
+
